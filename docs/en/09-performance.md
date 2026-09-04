@@ -32,26 +32,32 @@ pointer directly inside the loop.
 
 ---
 
-## 9.2. Release builds compile differently — and that is the point
+## 9.2. Release builds still compile differently
 
-`Package.swift` builds the `AegisECS` target with
+`AegisECS`'s target carries no unsafe compiler flags — Swift's array-bounds
+and integer-overflow checks stay on in every configuration, including
+release. That is deliberate, not an oversight: a target that declares
+`unsafeFlags` cannot be resolved as a versioned SwiftPM dependency at all —
+SwiftPM refuses to build against a dependency that declares unsafe flags at
+any version, branch, or revision; only a local `path` dependency is exempt.
+Keeping this library's release build fully checked is what lets anyone
+depend on it with an ordinary `.package(url:from:)`.
 
-```swift
-.unsafeFlags(["-Ounchecked"], .when(configuration: .release))
-```
+The hot accessors — `ComponentStore.has(_:)`, `indexOf(_:)`, `entityAt(_:)`,
+all doc-commented as "deliberately unchecked hot-loop primitives" — stay fast
+anyway, for a different reason: they trust the caller and skip their own
+manual guard, and the actual per-element work in a system's inner loop runs
+over raw column pointers (`columnF32(_:)` and friends), which Swift never
+bounds-checks regardless of build configuration. Swift's own automatic check
+still catches genuine misuse — an out-of-range entity, an overflowing count —
+as a clean crash instead of silently reading garbage.
 
-In a release build this switches off Swift's array-bounds and integer-overflow
-checks inside the library. It is exactly why the hot accessors —
-`ComponentStore.has(_:)`, `indexOf(_:)`, `entityAt(_:)`, all doc-commented as
-"deliberately unchecked hot-loop primitives" — can run at raw-pointer speed: in
-a debug build the same calls still carry Swift's normal safety checks, so a
-misuse is caught as a crash during development instead of silently reading
-garbage in production.
-
-The practical consequence: **a debug-build timing tells you almost nothing
-about production performance.** Always measure with `swift build -c release`
-(or Xcode's Release configuration) before drawing any conclusion about where
-time actually goes.
+Release still means something, though: whole-module optimization and
+inlining are what a debug build (`-Onone`) skips, and that gap is large. The
+practical consequence stands: **a debug-build timing tells you almost
+nothing about production performance.** Always measure with `swift build -c
+release` (or Xcode's Release configuration) before drawing any conclusion
+about where time actually goes.
 
 ---
 
@@ -188,9 +194,11 @@ across runs, not a single "it looked faster" impression.
 
 ## 9.8. What the library deliberately does not do
 
-- **Does not bounds-check the hot primitives in release.**
-  `has(_:)`/`indexOf(_:)`/`entityAt(_:)` are unchecked under `-Ounchecked` — a
-  deliberate, clearly-named trade of safety for speed (§9.2).
+- **Does not defensively guard the hot primitives.**
+  `has(_:)`/`indexOf(_:)`/`entityAt(_:)` trust the caller and skip their own
+  manual bounds check — a deliberate, clearly-named trade of defensiveness
+  for speed. Swift's own automatic bounds check still runs underneath in
+  every configuration (§9.2).
 - **Does not grow on its own.** `World.reserveCapacity()` is an explicit,
   allocating operation you call at a safe barrier; a hidden allocation inside
   a frame would be a stutter at an unpredictable moment. See
@@ -209,8 +217,8 @@ across runs, not a single "it looked faster" impression.
 1. Component data lives in flat columns indexed by dense slot, never as one
    object per entity — that is what makes iteration cache-friendly, in any
    language.
-2. Release builds compile with `-Ounchecked`; only release-build numbers mean
-   anything.
+2. Release builds compile with whole-module optimization and no unsafe
+   compiler flags; only release-build numbers mean anything.
 3. Per-entity data pays no ARC cost — only a handful of long-lived objects
    (the world, each store, the scheduler) are classes at all.
 4. Destruction cost is proportional to victims × stores, and the library

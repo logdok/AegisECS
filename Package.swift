@@ -26,13 +26,14 @@ let package = Package(
     ],
     targets: [
         .target(
-            name: "AegisECS",
-            swiftSettings: [
-                // The hot loops index dense columns through
-                // UnsafeMutableBufferPointer; unchecked release keeps them at
-                // C-like speed. Debug builds keep bounds checks.
-                .unsafeFlags(["-Ounchecked"], .when(configuration: .release)),
-            ]
+            name: "AegisECS"
+            // No unsafe compiler flags: a target that declares unsafeFlags
+            // cannot be resolved by anyone as a version/branch/revision
+            // SwiftPM dependency, only as a local path dependency. The hot
+            // loops already index dense columns through raw pointers
+            // (UnsafeMutableBufferPointer), which Swift never bounds-checks
+            // regardless of build configuration — so this library stays fast
+            // in release without needing -Ounchecked. See docs/en/09-performance.md §9.2.
         ),
         .target(
             name: "AegisECSInspectorUI",
